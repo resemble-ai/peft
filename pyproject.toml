@@ -43,3 +43,6 @@ markers = [
     "regression: whether to run regression suite test",
     "bitsandbytes: select bitsandbytes integration tests"
 ]
+[project.urls]
+"Homepage" = "https://github.com/resemble-ai/peft"
+"Bug Tracker" = "https://github.com/resemble-ai/peft/issues"

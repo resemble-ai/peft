@@ -16,6 +16,7 @@ from __future__ import annotations
 import copy
 import inspect
 import os
+import re
 import warnings
 from contextlib import nullcontext
 from typing import Any, Optional
@@ -25,7 +26,7 @@ import torch
 from accelerate.hooks import add_hook_to_module, remove_hook_from_module
 from accelerate.utils import is_npu_available, is_xpu_available
 from huggingface_hub import file_exists
-from huggingface_hub.utils import EntryNotFoundError, HFValidationError
+from huggingface_hub.errors import EntryNotFoundError, HFValidationError
 from packaging import version
 from safetensors.torch import storage_ptr, storage_size
 
@@ -60,18 +61,18 @@ if version.parse(accelerate.__version__) >= version.parse("0.29.0"):
 __all__ = [
     "CONFIG_NAME",
     "EMBEDDING_LAYER_NAMES",
+    "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "SAFETENSORS_WEIGHTS_NAME",
     "TRANSFORMERS_MODELS_TO_ADALORA_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_FEEDFORWARD_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_IA3_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_LORA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_PREFIX_TUNING_POSTPROCESS_MAPPING",
-    "TRANSFORMERS_MODELS_TO_LNTUNING_TARGET_MODULES_MAPPING",
-    "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "TRANSFORMERS_MODELS_TO_VBLORA_TARGET_MODULES_MAPPING",
-    "TRANSFORMERS_MODELS_TO_FOURIERFT_TARGET_MODULES_MAPPING",
+    "TRANSFORMERS_MODELS_TO_VERA_TARGET_MODULES_MAPPING",
     "WEIGHTS_NAME",
-    "INCLUDE_LINEAR_LAYERS_SHORTHAND",
     "bloom_model_postprocess_past_key_value",
     "starcoder_model_postprocess_past_key_value",
 ]
@@ -114,6 +115,7 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
     is_gptq_quantized = getattr(model, "quantization_method", None) == "gptq"
     is_aqlm_quantized = getattr(model, "quantization_method", None) == "aqlm"
     is_eetq_quantized = getattr(model, "quantization_method", None) == "eetq"
+    is_torchao_quantized = getattr(model, "quantization_method", None) == "torchao"
     is_hqq_quantized = getattr(model, "quantization_method", None) == "hqq" or getattr(model, "hqq_quantized", False)
 
     if gradient_checkpointing_kwargs is None:
@@ -123,7 +125,13 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
         # freeze base model's layers
         param.requires_grad = False
 
-    if not is_gptq_quantized and not is_aqlm_quantized and not is_eetq_quantized and not is_hqq_quantized:
+    if (
+        not is_gptq_quantized
+        and not is_aqlm_quantized
+        and not is_eetq_quantized
+        and not is_hqq_quantized
+        and not is_torchao_quantized
+    ):
         # cast all non INT8 parameters to fp32
         for param in model.parameters():
             if (
@@ -132,7 +140,12 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True, grad
                 param.data = param.data.to(torch.float32)
 
     if (
-        loaded_in_kbit or is_gptq_quantized or is_aqlm_quantized or is_eetq_quantized or is_hqq_quantized
+        loaded_in_kbit
+        or is_gptq_quantized
+        or is_aqlm_quantized
+        or is_eetq_quantized
+        or is_hqq_quantized
+        or is_torchao_quantized
     ) and use_gradient_checkpointing:
         # When having `use_reentrant=False` + gradient_checkpointing, there is no need for this hack
         if "use_reentrant" not in gradient_checkpointing_kwargs or gradient_checkpointing_kwargs["use_reentrant"]:
@@ -513,6 +526,8 @@ def fsdp_auto_wrap_policy(model):
     ).split(",")
     transformer_cls_to_wrap = {PrefixEncoder, PromptEncoder, PromptEmbedding}
     for layer_class in transformer_cls_names_to_wrap:
+        if len(layer_class) == 0:
+            continue
         transformer_cls = get_module_class_from_name(model, layer_class)
         if transformer_cls is None:
             raise Exception("Could not find the transformer layer class to wrap in the model.")
@@ -704,3 +719,8 @@ def check_file_exists_on_hf_hub(repo_id: str, filename: str, **kwargs) -> Option
         )
 
     return exists
+
+
+def get_pattern_key(pattern_keys, key_to_match):
+    """Match a substring of key_to_match in pattern keys"""
+    return next(filter(lambda key: re.match(rf".*\.{key}$", key_to_match), pattern_keys), key_to_match)

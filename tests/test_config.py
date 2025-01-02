@@ -16,9 +16,11 @@ import json
 import os
 import pickle
 import tempfile
+import unittest
 import warnings
 
 import pytest
+from parameterized import parameterized
 
 from peft import (
     AdaLoraConfig,
@@ -32,7 +34,6 @@ from peft import (
     LoKrConfig,
     LoraConfig,
     MultitaskPromptTuningConfig,
-    OFTConfig,
     PeftConfig,
     PeftType,
     PolyConfig,
@@ -40,7 +41,6 @@ from peft import (
     PromptEncoder,
     PromptEncoderConfig,
     PromptTuningConfig,
-    TaskType,
     VBLoRAConfig,
     VeraConfig,
 )
@@ -69,8 +69,8 @@ ALL_CONFIG_CLASSES = (
 )
 
 
-class TestPeftConfig:
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+class PeftConfigTester(unittest.TestCase):
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_methods(self, config_class):
         r"""
         Test if all configs have the expected methods. Here we test
@@ -86,25 +86,9 @@ class TestPeftConfig:
         assert hasattr(config, "from_pretrained")
         assert hasattr(config, "from_json_file")
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    @pytest.mark.parametrize("valid_task_type", list(TaskType) + [None])
-    def test_valid_task_type(self, config_class, valid_task_type):
-        r"""
-        Test if all configs work correctly for all valid task types
-        """
-        config_class(task_type=valid_task_type)
-
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_invalid_task_type(self, config_class):
-        r"""
-        Test if all configs correctly raise the defined error message for invalid task types.
-        """
-        invalid_task_type = "invalid-task-type"
-        with pytest.raises(
-            ValueError,
-            match=f"Invalid task type: '{invalid_task_type}'. Must be one of the following task types: {', '.join(TaskType)}.",
-        ):
-            config_class(task_type=invalid_task_type)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
+    def test_task_type(self, config_class):
+        config_class(task_type="test")
 
     def test_from_peft_type(self):
         r"""
@@ -118,7 +102,7 @@ class TestPeftConfig:
             config = PeftConfig.from_peft_type(peft_type=peft_type)
             assert type(config) is expected_cls
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_from_pretrained(self, config_class):
         r"""
         Test if the config is correctly loaded using:
@@ -128,7 +112,7 @@ class TestPeftConfig:
             # Test we can load config from delta
             config_class.from_pretrained(model_name, revision=revision)
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_save_pretrained(self, config_class):
         r"""
         Test if the config is correctly saved and loaded using
@@ -141,7 +125,7 @@ class TestPeftConfig:
             config_from_pretrained = config_class.from_pretrained(tmp_dirname)
             assert config.to_dict() == config_from_pretrained.to_dict()
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_from_json_file(self, config_class):
         config = config_class()
         with tempfile.TemporaryDirectory() as tmp_dirname:
@@ -159,7 +143,7 @@ class TestPeftConfig:
             config_from_json = config_class.from_json_file(config_path)
             assert config.to_dict() == config_from_json
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_to_dict(self, config_class):
         r"""
         Test if the config can be correctly converted to a dict using:
@@ -168,7 +152,7 @@ class TestPeftConfig:
         config = config_class()
         assert isinstance(config.to_dict(), dict)
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_from_pretrained_cache_dir(self, config_class):
         r"""
         Test if the config is correctly loaded with extra kwargs
@@ -186,7 +170,7 @@ class TestPeftConfig:
             PeftConfig.from_pretrained("ybelkada/test-st-lora", cache_dir=tmp_dirname)
             assert "models--ybelkada--test-st-lora" in os.listdir(tmp_dirname)
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_save_pretrained_with_runtime_config(self, config_class):
         r"""
         Test if the config correctly removes runtime config when saving
@@ -201,7 +185,7 @@ class TestPeftConfig:
                 cfg = config_class.from_pretrained(tmp_dirname)
                 assert not cfg.runtime_config.ephemeral_gpu_offload
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_set_attributes(self, config_class):
         # manually set attributes and check if they are correctly written
         config = config_class(peft_type="test")
@@ -213,21 +197,21 @@ class TestPeftConfig:
             config_from_pretrained = config_class.from_pretrained(tmp_dirname)
             assert config.to_dict() == config_from_pretrained.to_dict()
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_config_copy(self, config_class):
         # see https://github.com/huggingface/peft/issues/424
         config = config_class()
         copied = copy.copy(config)
         assert config.to_dict() == copied.to_dict()
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_config_deepcopy(self, config_class):
         # see https://github.com/huggingface/peft/issues/424
         config = config_class()
         copied = copy.deepcopy(config)
         assert config.to_dict() == copied.to_dict()
 
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
+    @parameterized.expand(ALL_CONFIG_CLASSES)
     def test_config_pickle_roundtrip(self, config_class):
         # see https://github.com/huggingface/peft/issues/424
         config = config_class()
@@ -256,9 +240,7 @@ class TestPeftConfig:
         expected_msg = "for MLP, the argument `encoder_num_layers` is ignored. Exactly 2 MLP layers are used."
         assert str(record.list[0].message) == expected_msg
 
-    @pytest.mark.parametrize(
-        "config_class", [LoHaConfig, LoraConfig, IA3Config, OFTConfig, BOFTConfig, HRAConfig, VBLoRAConfig]
-    )
+    @parameterized.expand([LoHaConfig, LoraConfig, IA3Config, BOFTConfig, HRAConfig, VBLoRAConfig])
     def test_save_pretrained_with_target_modules(self, config_class):
         # See #1041, #1045
         config = config_class(target_modules=["a", "list"])
@@ -328,70 +310,3 @@ class TestPeftConfig:
         # Test that a warning is raised when r != 8 in AdaLoraConfig
         with pytest.warns(UserWarning, match="Note that `r` is not used in AdaLora and will be ignored."):
             AdaLoraConfig(r=10)
-
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_from_pretrained_forward_compatible(self, config_class, tmp_path, recwarn):
-        """
-        Make it possible to load configs that contain unknown keys by ignoring them.
-
-        The idea is to make PEFT configs forward-compatible with future versions of the library.
-        """
-        config = config_class()
-        config.save_pretrained(tmp_path)
-        # add a spurious key to the config
-        with open(tmp_path / "adapter_config.json") as f:
-            config_dict = json.load(f)
-        config_dict["foobar"] = "baz"
-        config_dict["spam"] = 123
-        with open(tmp_path / "adapter_config.json", "w") as f:
-            json.dump(config_dict, f)
-
-        msg = f"Unexpected keyword arguments ['foobar', 'spam'] for class {config_class.__name__}, these are ignored."
-        config_from_pretrained = config_class.from_pretrained(tmp_path)
-
-        assert len(recwarn) == 1
-        assert recwarn.list[0].message.args[0].startswith(msg)
-        assert "foo" not in config_from_pretrained.to_dict()
-        assert "spam" not in config_from_pretrained.to_dict()
-        assert config.to_dict() == config_from_pretrained.to_dict()
-        assert isinstance(config_from_pretrained, config_class)
-
-    @pytest.mark.parametrize("config_class", ALL_CONFIG_CLASSES)
-    def test_from_pretrained_sanity_check(self, config_class, tmp_path):
-        """Following up on the previous test about forward compatibility, we *don't* want any random json to be accepted as
-        a PEFT config. There should be a minimum set of required keys.
-        """
-        non_peft_json = {"foo": "bar", "baz": 123}
-        with open(tmp_path / "adapter_config.json", "w") as f:
-            json.dump(non_peft_json, f)
-
-        msg = f"The config that is trying to be loaded is not a valid {config_class.__name__} config"
-        with pytest.raises(TypeError, match=msg):
-            config_class.from_pretrained(tmp_path)
-
-    def test_lora_config_layers_to_transform_validation(self):
-        """Test that specifying layers_pattern without layers_to_transform raises an error"""
-        with pytest.raises(
-            ValueError, match="When `layers_pattern` is specified, `layers_to_transform` must also be specified."
-        ):
-            LoraConfig(r=8, lora_alpha=16, target_modules=["query", "value"], layers_pattern="model.layers")
-
-        # Test that specifying both layers_to_transform and layers_pattern works fine
-        config = LoraConfig(
-            r=8,
-            lora_alpha=16,
-            target_modules=["query", "value"],
-            layers_to_transform=[0, 1, 2],
-            layers_pattern="model.layers",
-        )
-        assert config.layers_to_transform == [0, 1, 2]
-        assert config.layers_pattern == "model.layers"
-
-        # Test that not specifying either works fine
-        config = LoraConfig(
-            r=8,
-            lora_alpha=16,
-            target_modules=["query", "value"],
-        )
-        assert config.layers_to_transform is None
-        assert config.layers_pattern is None

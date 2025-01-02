@@ -15,7 +15,7 @@
 from setuptools import find_packages, setup
 
 
-VERSION = "0.14.1.dev0"
+VERSION = "0.13.1.dev0"
 
 extras = {}
 extras["quality"] = [
@@ -34,10 +34,8 @@ extras["test"] = extras["dev"] + [
     "pytest-xdist",
     "parameterized",
     "datasets",
-    "diffusers",
+    "diffusers<0.21.0",
     "scipy",
-    "protobuf",
-    "sentencepiece",
 ]
 
 setup(
@@ -56,7 +54,7 @@ setup(
     packages=find_packages("src"),
     package_data={"peft": ["py.typed", "tuners/boft/fbd/fbd_cuda.cpp", "tuners/boft/fbd/fbd_cuda_kernel.cu"]},
     entry_points={},
-    python_requires=">=3.9.0",
+    python_requires=">=3.8.0",
     install_requires=[
         "numpy>=1.17",
         "packaging>=20.0",
@@ -67,7 +65,7 @@ setup(
         "tqdm",
         "accelerate>=0.21.0",
         "safetensors",
-        "huggingface_hub>=0.25.0",
+        "huggingface_hub>=0.17.0",
     ],
     extras_require=extras,
     classifiers=[
@@ -78,10 +76,7 @@ setup(
         "License :: OSI Approved :: Apache Software License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.8",
         "Topic :: Scientific/Engineering :: Artificial Intelligence",
     ],
 )

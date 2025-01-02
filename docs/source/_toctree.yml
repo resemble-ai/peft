@@ -116,12 +116,6 @@
       title: FourierFT
     - local: package_reference/vblora
       title: VB-LoRA
-    - local: package_reference/hra
-      title: HRA
-    - local: package_reference/cpt
-      title: CPT
-    - local: package_reference/bone
-      title: Bone
 
     title: Adapters
   - sections:
@@ -129,7 +123,5 @@
       title: Model merge
     - local: package_reference/helpers
       title: Helpers
-    - local: package_reference/hotswap
-      title: Hotswapping adapters
     title: Utilities
   title: API reference

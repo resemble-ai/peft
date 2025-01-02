@@ -30,7 +30,6 @@ from transformers import (
     AutoModelForSequenceClassification,
     BitsAndBytesConfig,
 )
-from transformers.pytorch_utils import Conv1D
 
 from peft import (
     AdaptionPromptConfig,
@@ -93,6 +92,9 @@ REGEX_TEST_CASES = [
     ("foo.bar.1.baz", ["baz"], [0, 1, 2], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [1], ["bar"], True),
     ("foo.bar.1.baz", ["baz", "spam"], [0, 1, 2], ["bar"], True),
+    # empty layers_to_transform
+    ("foo.bar.7.baz", ["baz"], [], ["bar"], True),
+    ("foo.bar.7.baz", ["baz"], None, ["bar"], True),
     # empty layers_pattern
     ("foo.whatever.1.baz", ["baz"], [1], [], True),
     ("foo.whatever.1.baz", ["baz"], [0], [], False),
@@ -334,12 +336,11 @@ class PeftCustomKwargsTester(unittest.TestCase):
         model_id = "hf-internal-testing/tiny-stable-diffusion-torch"
         model = StableDiffusionPipeline.from_pretrained(model_id)
         config = LoraConfig(base_model_name_or_path=model_id, target_modules="all-linear")
-
-        # all linear layers should be converted
-        num_linear = sum(isinstance(module, (nn.Linear, Conv1D)) for module in model.unet.modules())
-        model.unet = get_peft_model(model.unet, config)
-        num_lora = sum(isinstance(module, LoraLayer) for module in model.unet.modules())
-        assert num_lora == num_linear
+        with pytest.raises(
+            ValueError,
+            match="Only instances of PreTrainedModel support `target_modules='all-linear'`",
+        ):
+            model.unet = get_peft_model(model.unet, config)
 
     def test_maybe_include_all_linear_does_not_target_classifier_head(self):
         # See issue 2027
@@ -350,8 +351,6 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # sanity check
         assert isinstance(model.score, nn.Linear)
 
-        num_linear = sum(isinstance(module, (nn.Linear, Conv1D)) for module in model.modules())
-
         config = LoraConfig(task_type="SEQ_CLS", target_modules="all-linear")
         model = get_peft_model(model, config)
         assert isinstance(model.base_model.score, ModulesToSaveWrapper)
@@ -359,10 +358,6 @@ class PeftCustomKwargsTester(unittest.TestCase):
         # the bug was that these were lora.Linear instances
         assert isinstance(model.base_model.score.original_module, nn.Linear)
         assert isinstance(model.base_model.score.modules_to_save["default"], nn.Linear)
-
-        # ensure that all but one linear layer was targeted by LoRA
-        num_lora = sum(isinstance(module, LoraLayer) for module in model.modules())
-        assert num_lora == num_linear - 1
 
 
 class MLP(nn.Module):
@@ -417,79 +412,6 @@ class TestTargetedModuleNames(unittest.TestCase):
         model = get_peft_model(model, config)
         expected = [
             f"transformer.h.{i}.self_attention.query_key_value" for i in range(len(model.base_model.transformer.h))
-        ]
-        assert model.targeted_module_names == expected
-
-
-class TestExcludedModuleNames(unittest.TestCase):
-    """Check that the attribute exclude_module is correctly set.
-
-    This checks LoRA and IA³, but this should be sufficient, testing all other tuners is not necessary.
-    """
-
-    def test_two_excluded_module_regex(self):
-        model = MLP()
-        model = get_peft_model(model, LoraConfig(target_modules=("lin.*"), exclude_modules="lin0"))
-        assert model.targeted_module_names == ["lin1"]
-
-    def test_two_excluded_module_list(self):
-        model = MLP()
-        model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"], exclude_modules="lin0"))
-        assert model.targeted_module_names == ["lin1"]
-
-    def test_multiple_excluded_modules_list(self):
-        model = MLP()
-        model = get_peft_model(model, LoraConfig(target_modules=["lin0", "lin1"], exclude_modules=["lin0"]))
-        assert model.targeted_module_names == ["lin1"]
-
-    def test_ia3_two_excluded_module_regex(self):
-        model = MLP()
-        model = get_peft_model(
-            model, IA3Config(target_modules=".*lin.*", feedforward_modules=".*lin.*", exclude_modules="lin0")
-        )
-        assert model.targeted_module_names == ["lin1"]
-
-    def test_ia3_multiple_excluded_modules_list(self):
-        model = MLP()
-        model = get_peft_model(
-            model, IA3Config(target_modules=["lin0", "lin1"], feedforward_modules=".*lin.*", exclude_modules=["lin1"])
-        )
-        assert model.targeted_module_names == ["lin0"]
-
-    def test_all_modules_excluded(self):
-        model = MLP()
-        with pytest.raises(ValueError, match="All modules were excluded"):
-            get_peft_model(
-                model,
-                LoraConfig(
-                    target_modules=["lin0", "lin1", "relu", "drop", "sm"],
-                    exclude_modules=["lin0", "lin1", "relu", "drop", "sm"],
-                ),
-            )
-
-    def test_no_modules_matched(self):
-        model = MLP()
-        with pytest.raises(ValueError, match="Target modules .* not found in the base model"):
-            get_peft_model(model, LoraConfig(target_modules=["non_existent_module"]))
-
-    def test_some_modules_excluded_some_unmatched(self):
-        model = MLP()
-        with pytest.raises(ValueError, match="No modules were targeted for adaptation"):
-            get_peft_model(model, LoraConfig(target_modules=["lin0", "non_existent_module"], exclude_modules=["lin0"]))
-
-    def test_exclude_modules_not_used(self):
-        model = MLP()
-        with pytest.warns(UserWarning, match="You have passed exclude_modules=.* but no modules were excluded"):
-            get_peft_model(model, LoraConfig(target_modules=["lin1"], exclude_modules=["non_existent_module"]))
-
-    def test_realistic_example(self):
-        model = AutoModelForCausalLM.from_pretrained("hf-internal-testing/tiny-random-BloomForCausalLM")
-        config = LoraConfig(task_type="CAUSAL_LM", exclude_modules="transformer.h.2.self_attention.query_key_value")
-        model = get_peft_model(model, config)
-        expected = [
-            f"transformer.h.{i}.self_attention.query_key_value"
-            for i in range(len(model.base_model.transformer.h))
-            if i != 2
         ]
         assert model.targeted_module_names == expected
 
@@ -1405,45 +1327,3 @@ class TestFindMinimalTargetModules:
         expected = {"time_emb_proj", "proj", "proj_out"}
         result = find_minimal_target_modules(target_modules, other_module_names)
         assert result == expected
-
-    def test_get_peft_modules_module_name_is_suffix_of_another_module(self):
-        # Solves the following bug:
-        # https://github.com/huggingface/diffusers/pull/9622#issuecomment-2404789721
-
-        # The cause for the bug is as follows: When we have, say, a module called "bar.0.query" that we want to target
-        # and another module called "foo_bar.0.query" that we don't want to target, there was potential for an error.
-        # This is not caused by _find_minimal_target_modules directly, but rather the bug was inside of
-        # BaseTuner.inject_adapter and how the names_no_target were chosen. Those used to be chosen based on suffix. In
-        # our example, however, "bar.0.query" is a suffix of "foo_bar.0.query", therefore "foo_bar.0.query" was *not*
-        # added to names_no_target when it should have. As a consequence, during the optimization, it looks like "query"
-        # is safe to use as target_modules because we don't see that it wrongly matches "foo_bar.0.query".
-
-        # ensure that we have sufficiently many modules to trigger the optimization
-        n_layers = MIN_TARGET_MODULES_FOR_OPTIMIZATION + 1
-
-        class InnerModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.query = nn.Linear(10, 10)
-
-        class OuterModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-                # note that "transformer_blocks" is a suffix of "single_transformer_blocks"
-                self.transformer_blocks = nn.ModuleList([InnerModule() for _ in range(n_layers)])
-                self.single_transformer_blocks = nn.ModuleList([InnerModule() for _ in range(n_layers)])
-
-        # we want to match all "transformer_blocks" layers but not "single_transformer_blocks"
-        target_modules = [f"transformer_blocks.{i}.query" for i in range(n_layers)]
-        model = get_peft_model(OuterModule(), LoraConfig(target_modules=target_modules))
-
-        # sanity check: we should have n_layers PEFT layers in model.transformer_blocks
-        transformer_blocks = model.base_model.model.transformer_blocks
-        assert sum(isinstance(module, BaseTunerLayer) for module in transformer_blocks.modules()) == n_layers
-
-        # we should not have any PEFT layers in model.single_transformer_blocks
-        single_transformer_blocks = model.base_model.model.single_transformer_blocks
-        assert not any(isinstance(module, BaseTunerLayer) for module in single_transformer_blocks.modules())
-
-        # target modules should *not* be simplified to "query" as that would match "single_transformers_blocks" too
-        assert model.peft_config["default"].target_modules != {"query"}
